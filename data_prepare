@@ -153,5 +153,3 @@ response_n <- pred_n$RET
 train <- (pred$DATE <= 198612)
 test <- !train
 
-
-### Modeling ###
