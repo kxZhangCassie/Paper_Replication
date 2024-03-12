@@ -1,1 +1,157 @@
+### Replicate the results ###
+rm(list = ls())
 
+library(data.table)
+library(dplyr)
+library(fastDummies)
+library(lubridate)
+library(purrr)
+library(MASS)
+library(pls)
+library(hqreg)
+library(glmnet)
+library(grpreg)
+library(randomForest) 
+library(gbm)
+library(ggplot2)
+
+
+### Data input ###
+df <- fread(file = "datashare/GKX.csv")
+totaldata <- (df$DATE >= 19570329)&(df$DATE <= 20161231)
+df <- df[totaldata, ]
+
+
+### Define 920 features ###
+# Firm Characteristics Dataset Description:
+# Columns:
+# permno: CRSP Permanent Company Number
+# DATE: The end day of each month (YYYYMMDD) 
+# RET: CRSP Holding Returns with dividends in that month (can used as response variable) 
+# 94 Lagged Firm Characteristics (Details are in the appendix)
+# sic2: The first two digits of the Standard Industrial Classification code on DATE
+# (e.g. When DATE=19570329 in our dataset, you can use the monthly RET at 195703 as the response variable.) 
+
+
+## 94 characteristics of predictors
+char94 <- df %>%
+  mutate(., 
+         DATE = as.numeric(substr(DATE, 
+                                  start = 1, 
+                                  stop = 6))) %>%
+  dplyr::select(., 
+                RET, 
+                DATE, 
+                mvel1, 
+                beta : bm_ia) %>%
+  dplyr::select(., 
+                -c(mve0, sic2)) %>%
+  cbind(., 1)
+
+
+## create eight macroeconomic predictors
+monthly <- read.csv2("datashare/monthly_2021.csv", 
+                     sep = ",", 
+                     na.strings = "NaN", 
+                     stringsAsFactors = FALSE)
+
+mm <- matrix(as.numeric(unlist(monthly)), ncol = ncol(monthly))
+colnames(mm) = c(names(monthly))
+
+macro <-  mm %>%
+  as.data.frame() %>%
+  mutate(.,
+         dp = log(D12) - log(Index),
+         ep_m = log(E12) - log(Index),
+         tms = lty - tbl,
+         dfy = BAA - AAA) %>%
+  dplyr::select(.,
+                yyyymm,
+                dp, 
+                ep_m, 
+                b.m, 
+                ntis, 
+                tbl, 
+                tms, 
+                dfy, 
+                svar)
+colnames(macro)[1] = "DATE"
+totaldata <- (macro$DATE >= 195703)&(macro$DATE <= 201612)
+macropred <- macro[totaldata, ]
+
+
+## merge two data sets
+pred <- data.table(char94, key = "DATE")[data.table(macropred, key = "DATE")]
+cit <- pred[ , 3:96]
+cit_3 <- dplyr::select(cit, 
+                       mvel1, 
+                       bm,
+                       mom12m,
+                       mom1m, 
+                       mom36m,
+                       mom6m)
+xt <- pred[ , 97:105]
+
+kronecker_product <- function(a){a*xt} 
+zit <- cit %>%
+  apply(., 
+        MARGIN = 2, 
+        kronecker_product) %>%
+  unlist() %>%
+  as.numeric() %>%
+  matrix(., 
+         nrow = nrow(cit))
+z3it <- cit_3 %>%
+  apply(., 
+        MARGIN = 2, 
+        kronecker_product) %>%
+  unlist() %>%
+  as.numeric() %>%
+  matrix(.,
+         nrow = nrow(cit_3))
+
+## drop the missing value
+pred_n <- na.omit(pred)
+cit_n <- pred_n[ , 3:96]
+xt_n <- pred_n[ , 97:105]
+cit_3_n <- dplyr::select(cit_n, 
+                         mvel1,
+                         bm, 
+                         mom12m, 
+                         mom1m,
+                         mom36m,
+                         mom6m)
+kronecker_product <- function(a){a*xt_n}
+
+z3it_n <- cit_3_n %>%
+  apply(., 
+        MARGIN = 2, 
+        kronecker_product) %>%
+  unlist() %>%
+  as.numeric() %>%
+  matrix(.,
+         nrow = nrow(cit_3_n))
+train_n <- (pred_n$DATE <= 198612)
+
+
+## create the industry dummies 
+indsdummy <- df$sic2 %>%
+  as.character() %>%
+  dummy_cols(., 
+             remove_most_frequent_dummy = TRUE, 
+             ignore_na = TRUE)
+fullfeatures <- cbind(zit, indsdummy)
+ols3features <- cbind(z3it, indsdummy)
+pred <- data.frame(pred$DATE, response, fullfeatures)
+
+## define the response variable 
+response <- df$RET
+response_n <- pred_n$RET
+
+
+## Sample splitting
+train <- (pred$DATE <= 198612)
+test <- !train
+
+
+### Modeling ###
