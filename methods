@@ -1,0 +1,60 @@
+### Modeling ###
+rm(list = ls())
+
+library(data.table)
+library(dplyr)
+library(fastDummies)
+library(lubridate)
+library(purrr)
+library(MASS)
+library(pls)
+library(hqreg)
+library(glmnet)
+library(grpreg)
+library(randomForest) 
+library(gbm)
+library(ggplot2)
+
+### Principal components regression (PCR)
+set.seed(1)
+pcr.fit <- pcr(response ~ . -DATE, 
+               data = pred, 
+               subset = train, 
+               scale = T, 
+               validation = "CV")
+summary(pcr.fit)
+validationplot(pcr.fit, 
+               val.type = "MSEP")
+pred.pcr <- predict(pcr.fit, 
+                    fullfeatures[!train, ], 
+                    ncomp = 30)
+
+
+### Elastic net (ENet)
+ENet.fit <- hqreg(fullfeatures[train, ], 
+                  response[train],
+                  method = "huber")
+pred.ENet <- predict(ENet.fit, 
+                     fullfeatures[!train, ])
+
+#### Random forest (RF) 
+set.seed(1)
+rf.fit <- randomForest(response ~ . -DATE, 
+                       data = pred, 
+                       subset = train, 
+                       mtry = 30, 
+                       importance = T)
+importance(rf.fit)
+varImpPlot(rf.fit)
+pred.rf <- predict(rf.fit, 
+                   newdata = fullfeatures[!train, ])
+
+### Assess predictive performance ###
+
+R2_oos <- function(
+    pred
+    )
+  {
+  y.test <- response[!train]
+  1- sum((pred - y.test)^2, na.rm = T) / sum(y.test^2, na.rm = T)
+}
