@@ -7,14 +7,6 @@ library(fastDummies)
 library(lubridate)
 library(purrr)
 library(MASS)
-library(pls)
-library(hqreg)
-library(glmnet)
-library(grpreg)
-library(randomForest) 
-library(gbm)
-library(ggplot2)
-
 
 ### Data input ###
 df <- fread(file = "datashare/GKX.csv")
